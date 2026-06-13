@@ -142,6 +142,46 @@ export interface Statistics {
   distanceTraveled: number;
 }
 
+export type ArenaPhase = 'idle' | 'countdown' | 'battle' | 'rest' | 'finished';
+
+export interface ArenaRank {
+  rank: string;
+  minWaves: number;
+  maxWaves: number;
+  color: string;
+  rewardMultiplier: number;
+}
+
+export const ARENA_RANKS: ArenaRank[] = [
+  { rank: '青铜海盗猎手', minWaves: 1, maxWaves: 3, color: '#cd7f32', rewardMultiplier: 1 },
+  { rank: '白银海盗猎手', minWaves: 4, maxWaves: 6, color: '#c0c0c0', rewardMultiplier: 1.5 },
+  { rank: '黄金海盗猎手', minWaves: 7, maxWaves: 9, color: '#ffd700', rewardMultiplier: 2 },
+  { rank: '铂金海盗猎手', minWaves: 10, maxWaves: 14, color: '#e5e4e2', rewardMultiplier: 3 },
+  { rank: '钻石海盗猎手', minWaves: 15, maxWaves: 19, color: '#b9f2ff', rewardMultiplier: 5 },
+  { rank: '传奇海盗克星', minWaves: 20, maxWaves: 999, color: '#ff6b35', rewardMultiplier: 10 },
+];
+
+export interface ArenaState {
+  phase: ArenaPhase;
+  currentWave: number;
+  wavesSurvived: number;
+  restTimeRemaining: number;
+  countdownTimeRemaining: number;
+  totalCreditsEarned: number;
+  finalRank: ArenaRank | null;
+  finalReward: number;
+}
+
+export interface LeaderboardEntry {
+  id: string;
+  playerName: string;
+  wavesSurvived: number;
+  creditsEarned: number;
+  rank: string;
+  date: number;
+  shipLevel: number;
+}
+
 export interface GameState {
   credits: number;
   currentPlanetId: string;
@@ -154,5 +194,7 @@ export interface GameState {
   travelState: TravelState | null;
   battleState: BattleState | null;
   eventState: GameEvent | null;
-  currentView: 'starmap' | 'trade' | 'upgrade' | 'quests';
+  currentView: 'starmap' | 'trade' | 'upgrade' | 'quests' | 'arena' | 'leaderboard';
+  arenaState: ArenaState | null;
+  leaderboard: LeaderboardEntry[];
 }

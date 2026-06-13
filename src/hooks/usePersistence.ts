@@ -34,6 +34,7 @@ export const localStorageAdapter: PersistenceAdapter = {
         travelState: null,
         battleState: null,
         eventState: null,
+        arenaState: null,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(toSave));
     } catch {
@@ -54,6 +55,7 @@ export const buildSavePayload = (state: GameState): GameState => ({
   travelState: null,
   battleState: null,
   eventState: null,
+  arenaState: null,
 });
 
 export interface UsePersistenceResult {

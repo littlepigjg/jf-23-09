@@ -11,4 +11,6 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'trade', label: '贸易', icon: '💹' },
   { key: 'upgrade', label: '升级', icon: '🔧' },
   { key: 'quests', label: '任务', icon: '📋' },
+  { key: 'arena', label: '竞技场', icon: '⚔️' },
+  { key: 'leaderboard', label: '排行榜', icon: '🏆' },
 ];

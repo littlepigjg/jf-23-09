@@ -8,8 +8,10 @@ import StarMap from '../components/StarMap';
 import TradePanel from '../components/TradePanel';
 import UpgradePanel from '../components/UpgradePanel';
 import QuestPanel from '../components/QuestPanel';
+import ArenaPanel from '../components/ArenaPanel';
+import LeaderboardPanel from '../components/LeaderboardPanel';
 import { rollTravelEvent } from '../utils/travelEngine';
-import { createInitialBattleState } from '../utils/battleEngine';
+import { createInitialBattleState, createArenaWaveBattleState } from '../utils/battleEngine';
 import type { GameState } from '../types/game';
 import { NAV_ITEMS } from '../data/navigation';
 
@@ -29,6 +31,8 @@ export default function GamePage() {
     saveGame,
     ship,
     currentPlanetId,
+    arenaState,
+    completeArenaWave,
   } = useGameStore();
 
   const lastTimeRef = useRef<number>(performance.now());
@@ -80,6 +84,22 @@ export default function GamePage() {
     }
   }, [travelState, ship.maxShield, ship.damage, setBattleState, triggerEvent]);
 
+  useEffect(() => {
+    if (arenaState?.phase === 'battle' && !battleState) {
+      const battle = createArenaWaveBattleState(
+        ship.maxShield,
+        ship.damage,
+        arenaState.currentWave,
+        ship.currentShield
+      );
+      setBattleState(battle);
+    }
+  }, [arenaState?.phase, arenaState?.currentWave, ship.maxShield, ship.damage, ship.currentShield, battleState, setBattleState]);
+
+  const handleArenaBattleFinish = (won: boolean) => {
+    completeArenaWave(won);
+  };
+
   const handleBackToMenu = () => {
     saveGame();
     navigate('/');
@@ -95,6 +115,10 @@ export default function GamePage() {
         return <UpgradePanel />;
       case 'quests':
         return <QuestPanel />;
+      case 'arena':
+        return <ArenaPanel />;
+      case 'leaderboard':
+        return <LeaderboardPanel />;
       default:
         return <StarMap />;
     }
@@ -152,9 +176,21 @@ export default function GamePage() {
 
       {battleState && (
         <div className="fixed inset-0 z-50">
+          {arenaState?.phase === 'battle' && (
+            <div
+              className="absolute top-4 left-1/2 -translate-x-1/2 px-6 py-2 bg-slate-900/90 backdrop-blur-sm rounded-lg border border-orange-500/50 z-50 pointer-events-none"
+            >
+              <div className="text-center">
+                <div className="text-xs text-slate-400">竞技场</div>
+                <div className="text-lg font-bold text-orange-400">
+                  第 {arenaState.currentWave} 波 · {arenaState.currentWave} 艘
+                </div>
+              </div>
+            </div>
+          )}
           <BattleScene
             difficulty={battleState.difficulty}
-            onFinish={completeBattle}
+            onFinish={arenaState?.phase === 'battle' ? handleArenaBattleFinish : completeBattle}
           />
         </div>
       )}

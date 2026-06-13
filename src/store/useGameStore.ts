@@ -1,5 +1,15 @@
 import { create } from 'zustand';
-import type { GameState, CargoItem, QuestState, BattleState, QuestStatus } from '../types/game';
+import type {
+  GameState,
+  CargoItem,
+  QuestState,
+  BattleState,
+  QuestStatus,
+  ArenaState,
+  LeaderboardEntry,
+  ArenaRank,
+} from '../types/game';
+import { ARENA_RANKS } from '../types/game';
 import { PLANETS, getDistance } from '../data/planets';
 import { QUESTS, getQuest } from '../data/quests';
 import {
@@ -56,6 +66,19 @@ export interface GameStore extends GameState {
     goodId?: string,
     planetId?: string
   ) => void;
+
+  startArena: () => void;
+  updateArena: (dt: number) => void;
+  setArenaPhase: (phase: ArenaState['phase']) => void;
+  completeArenaWave: (won: boolean) => void;
+  endArena: () => void;
+  repairShieldDuringRest: () => boolean;
+
+  addLeaderboardEntry: (entry: Omit<LeaderboardEntry, 'id' | 'date'>) => void;
+  getSortedLeaderboard: () => LeaderboardEntry[];
+  clearLeaderboard: () => void;
+
+  getArenaRank: (waves: number) => ArenaRank | null;
 }
 
 const initFromMarket = () => {
@@ -97,6 +120,8 @@ const createInitialState = (): GameState => {
     battleState: null,
     eventState: null,
     currentView: 'starmap',
+    arenaState: null,
+    leaderboard: [],
   };
 };
 
@@ -541,5 +566,192 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({ credits: newCredits, quests: newQuests, statistics: stats });
     get().saveGame();
     return true;
+  },
+
+  startArena: () => {
+    const state = get();
+    set({
+      arenaState: {
+        phase: 'countdown',
+        currentWave: 1,
+        wavesSurvived: 0,
+        restTimeRemaining: 0,
+        countdownTimeRemaining: 3,
+        totalCreditsEarned: 0,
+        finalRank: null,
+        finalReward: 0,
+      },
+      currentView: 'arena',
+      ship: { ...state.ship, currentShield: state.ship.maxShield },
+    });
+  },
+
+  updateArena: (dt) => {
+    const state = get();
+    if (!state.arenaState) return;
+
+    const arena = { ...state.arenaState };
+
+    if (arena.phase === 'countdown') {
+      arena.countdownTimeRemaining -= dt;
+      if (arena.countdownTimeRemaining <= 0) {
+        arena.phase = 'battle';
+        arena.countdownTimeRemaining = 0;
+      }
+    } else if (arena.phase === 'rest') {
+      arena.restTimeRemaining -= dt;
+      if (arena.restTimeRemaining <= 0) {
+        arena.phase = 'countdown';
+        arena.currentWave += 1;
+        arena.countdownTimeRemaining = 3;
+        arena.restTimeRemaining = 0;
+      }
+    }
+
+    set({ arenaState: arena });
+  },
+
+  setArenaPhase: (phase) => {
+    const state = get();
+    if (!state.arenaState) return;
+    set({ arenaState: { ...state.arenaState, phase } });
+  },
+
+  completeArenaWave: (won) => {
+    const state = get();
+    if (!state.arenaState) return;
+
+    const arena = { ...state.arenaState };
+
+    if (won) {
+      const waveReward = 100 + arena.currentWave * 50;
+      arena.wavesSurvived = arena.currentWave;
+      arena.totalCreditsEarned += waveReward;
+
+      if (state.battleState?.player.hp !== undefined) {
+        const newShield = Math.max(0, Math.min(state.ship.maxShield, state.battleState.player.hp));
+        set({
+          ship: { ...state.ship, currentShield: newShield },
+          credits: state.credits + waveReward,
+          battleState: null,
+        });
+      }
+
+      arena.phase = 'rest';
+      arena.restTimeRemaining = 10;
+    } else {
+      arena.wavesSurvived = Math.max(0, arena.currentWave - 1);
+      arena.phase = 'finished';
+
+      const rank = get().getArenaRank(arena.wavesSurvived);
+      arena.finalRank = rank;
+      const baseReward = arena.totalCreditsEarned;
+      const finalReward = Math.floor(baseReward * (rank?.rewardMultiplier ?? 1));
+      arena.finalReward = finalReward;
+
+      const bonusCredits = finalReward - arena.totalCreditsEarned;
+      if (bonusCredits > 0) {
+        set({
+          credits: state.credits + bonusCredits,
+          battleState: null,
+        });
+      }
+
+      get().addLeaderboardEntry({
+        playerName: '舰长',
+        wavesSurvived: arena.wavesSurvived,
+        creditsEarned: finalReward,
+        rank: rank?.rank ?? '青铜海盗猎手',
+        shipLevel: state.ship.shieldLevel + state.ship.cargoLevel + state.ship.weaponLevel,
+      });
+
+      const stats = {
+        ...state.statistics,
+        piratesDefeated: state.statistics.piratesDefeated + arena.wavesSurvived,
+      };
+      set({ statistics: stats });
+    }
+
+    set({ arenaState: arena });
+    get().saveGame();
+  },
+
+  endArena: () => {
+    const state = get();
+    if (!state.arenaState) return;
+
+    const arena = { ...state.arenaState };
+    arena.phase = 'finished';
+    arena.wavesSurvived = Math.max(0, arena.currentWave - 1);
+
+    const rank = get().getArenaRank(arena.wavesSurvived);
+    arena.finalRank = rank;
+    const finalReward = Math.floor(arena.totalCreditsEarned * (rank?.rewardMultiplier ?? 1));
+    arena.finalReward = finalReward;
+
+    get().addLeaderboardEntry({
+      playerName: '舰长',
+      wavesSurvived: arena.wavesSurvived,
+      creditsEarned: finalReward,
+      rank: rank?.rank ?? '青铜海盗猎手',
+      shipLevel: state.ship.shieldLevel + state.ship.cargoLevel + state.ship.weaponLevel,
+    });
+
+    set({
+      arenaState: arena,
+      battleState: null,
+    });
+    get().saveGame();
+  },
+
+  repairShieldDuringRest: () => {
+    const state = get();
+    if (!state.arenaState || state.arenaState.phase !== 'rest') return false;
+
+    const missing = state.ship.maxShield - state.ship.currentShield;
+    if (missing <= 0) return false;
+
+    const cost = missing * 2;
+    if (state.credits < cost) return false;
+
+    set({
+      credits: state.credits - cost,
+      ship: { ...state.ship, currentShield: state.ship.maxShield },
+    });
+    get().saveGame();
+    return true;
+  },
+
+  addLeaderboardEntry: (entry) => {
+    const state = get();
+    const newEntry: LeaderboardEntry = {
+      ...entry,
+      id: `lb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      date: Date.now(),
+    };
+    const newLeaderboard = [...state.leaderboard, newEntry]
+      .sort((a, b) => b.wavesSurvived - a.wavesSurvived || b.creditsEarned - a.creditsEarned)
+      .slice(0, 100);
+    set({ leaderboard: newLeaderboard });
+  },
+
+  getSortedLeaderboard: () => {
+    const state = get();
+    return [...state.leaderboard].sort(
+      (a, b) => b.wavesSurvived - a.wavesSurvived || b.creditsEarned - a.creditsEarned
+    );
+  },
+
+  clearLeaderboard: () => {
+    set({ leaderboard: [] });
+  },
+
+  getArenaRank: (waves) => {
+    for (const rank of ARENA_RANKS) {
+      if (waves >= rank.minWaves && waves <= rank.maxWaves) {
+        return rank;
+      }
+    }
+    return ARENA_RANKS[ARENA_RANKS.length - 1];
   },
 }));

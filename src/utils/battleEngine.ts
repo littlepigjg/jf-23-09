@@ -50,6 +50,56 @@ export const createInitialBattleState = (
   };
 };
 
+export const createArenaWaveBattleState = (
+  maxHp: number,
+  damage: number,
+  wave: number,
+  currentShield: number
+): BattleState => {
+  const canvasW = 800;
+  const canvasH = 500;
+
+  const player: BattleEntity = {
+    x: canvasW * 0.15,
+    y: canvasH * 0.5,
+    vx: 0,
+    vy: 0,
+    hp: currentShield,
+    maxHp,
+    angle: 0,
+  };
+
+  const pirateCount = wave;
+  const baseHp = 30 + wave * 10;
+  const pirates: BattleEntity[] = [];
+
+  for (let i = 0; i < pirateCount; i++) {
+    const row = Math.floor(i / 3);
+    const col = i % 3;
+    pirates.push({
+      x: canvasW * (0.6 + col * 0.12 + Math.random() * 0.05),
+      y: canvasH * (0.2 + row * 0.25 + Math.random() * 0.1),
+      vx: 0,
+      vy: 0,
+      hp: baseHp + Math.floor(Math.random() * 20),
+      maxHp: baseHp + Math.floor(Math.random() * 20),
+      angle: Math.PI,
+    });
+  }
+
+  return {
+    player,
+    pirates,
+    bullets: [],
+    particles: [],
+    isPlayerTurn: true,
+    result: 'ongoing',
+    countdown: 3,
+    difficulty: wave,
+    shakeTime: 0,
+  };
+};
+
 export const createBullet = (
   x: number,
   y: number,

@@ -24,6 +24,8 @@ import { MarketService } from '../services/marketService';
 import { getGood } from '../data/goods';
 import { getRandomEvent } from '../data/events';
 import { localStorageAdapter, buildSavePayload } from '../hooks/usePersistence';
+import { arenaActions } from '../hooks/useArena';
+import { leaderboardActions } from '../hooks/useLeaderboard';
 
 export interface GameStore extends GameState {
   hasSave: () => boolean;
@@ -570,17 +572,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   startArena: () => {
     const state = get();
+    const arenaState = arenaActions.startArena() as ArenaState;
     set({
-      arenaState: {
-        phase: 'countdown',
-        currentWave: 1,
-        wavesSurvived: 0,
-        restTimeRemaining: 0,
-        countdownTimeRemaining: 3,
-        totalCreditsEarned: 0,
-        finalRank: null,
-        finalReward: 0,
-      },
+      arenaState,
       currentView: 'arena',
       ship: { ...state.ship, currentShield: state.ship.maxShield },
     });
@@ -589,26 +583,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   updateArena: (dt) => {
     const state = get();
     if (!state.arenaState) return;
-
-    const arena = { ...state.arenaState };
-
-    if (arena.phase === 'countdown') {
-      arena.countdownTimeRemaining -= dt;
-      if (arena.countdownTimeRemaining <= 0) {
-        arena.phase = 'battle';
-        arena.countdownTimeRemaining = 0;
-      }
-    } else if (arena.phase === 'rest') {
-      arena.restTimeRemaining -= dt;
-      if (arena.restTimeRemaining <= 0) {
-        arena.phase = 'countdown';
-        arena.currentWave += 1;
-        arena.countdownTimeRemaining = 3;
-        arena.restTimeRemaining = 0;
-      }
-    }
-
-    set({ arenaState: arena });
+    const newArena = arenaActions.updateArena(state.arenaState, dt);
+    set({ arenaState: newArena });
   },
 
   setArenaPhase: (phase) => {
@@ -621,58 +597,32 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = get();
     if (!state.arenaState) return;
 
-    const arena = { ...state.arenaState };
+    const result = arenaActions.completeArenaWave(
+      state.arenaState,
+      won,
+      state.battleState,
+      state.ship,
+      state.credits
+    );
 
-    if (won) {
-      const waveReward = 100 + arena.currentWave * 50;
-      arena.wavesSurvived = arena.currentWave;
-      arena.totalCreditsEarned += waveReward;
-
-      if (state.battleState?.player.hp !== undefined) {
-        const newShield = Math.max(0, Math.min(state.ship.maxShield, state.battleState.player.hp));
-        set({
-          ship: { ...state.ship, currentShield: newShield },
-          credits: state.credits + waveReward,
-          battleState: null,
-        });
-      }
-
-      arena.phase = 'rest';
-      arena.restTimeRemaining = 10;
-    } else {
-      arena.wavesSurvived = Math.max(0, arena.currentWave - 1);
-      arena.phase = 'finished';
-
-      const rank = get().getArenaRank(arena.wavesSurvived);
-      arena.finalRank = rank;
-      const baseReward = arena.totalCreditsEarned;
-      const finalReward = Math.floor(baseReward * (rank?.rewardMultiplier ?? 1));
-      arena.finalReward = finalReward;
-
-      const bonusCredits = finalReward - arena.totalCreditsEarned;
-      if (bonusCredits > 0) {
-        set({
-          credits: state.credits + bonusCredits,
-          battleState: null,
-        });
-      }
-
-      get().addLeaderboardEntry({
-        playerName: '舰长',
-        wavesSurvived: arena.wavesSurvived,
-        creditsEarned: finalReward,
-        rank: rank?.rank ?? '青铜海盗猎手',
-        shipLevel: state.ship.shieldLevel + state.ship.cargoLevel + state.ship.weaponLevel,
-      });
-
-      const stats = {
-        ...state.statistics,
-        piratesDefeated: state.statistics.piratesDefeated + arena.wavesSurvived,
-      };
-      set({ statistics: stats });
+    let newLeaderboard = state.leaderboard;
+    if (result.leaderboardEntry) {
+      newLeaderboard = leaderboardActions.addEntry(state.leaderboard, result.leaderboardEntry);
     }
 
-    set({ arenaState: arena });
+    const newStats = {
+      ...state.statistics,
+      piratesDefeated: state.statistics.piratesDefeated + result.piratesDefeated,
+    };
+
+    set({
+      arenaState: result.arena,
+      ship: result.ship,
+      credits: result.credits,
+      battleState: result.battleState,
+      leaderboard: newLeaderboard,
+      statistics: newStats,
+    });
     get().saveGame();
   },
 
@@ -680,43 +630,32 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = get();
     if (!state.arenaState) return;
 
-    const arena = { ...state.arenaState };
-    arena.phase = 'finished';
-    arena.wavesSurvived = Math.max(0, arena.currentWave - 1);
-
-    const rank = get().getArenaRank(arena.wavesSurvived);
-    arena.finalRank = rank;
-    const finalReward = Math.floor(arena.totalCreditsEarned * (rank?.rewardMultiplier ?? 1));
-    arena.finalReward = finalReward;
-
-    get().addLeaderboardEntry({
-      playerName: '舰长',
-      wavesSurvived: arena.wavesSurvived,
-      creditsEarned: finalReward,
-      rank: rank?.rank ?? '青铜海盗猎手',
-      shipLevel: state.ship.shieldLevel + state.ship.cargoLevel + state.ship.weaponLevel,
-    });
+    const result = arenaActions.endArena(state.arenaState, state.ship, state.credits);
+    const newLeaderboard = leaderboardActions.addEntry(state.leaderboard, result.leaderboardEntry);
 
     set({
-      arenaState: arena,
-      battleState: null,
+      arenaState: result.arena,
+      battleState: result.battleState,
+      leaderboard: newLeaderboard,
     });
     get().saveGame();
   },
 
   repairShieldDuringRest: () => {
     const state = get();
-    if (!state.arenaState || state.arenaState.phase !== 'rest') return false;
+    if (!state.arenaState) return false;
 
-    const missing = state.ship.maxShield - state.ship.currentShield;
-    if (missing <= 0) return false;
+    const result = arenaActions.repairShieldDuringRest(
+      state.arenaState,
+      state.ship,
+      state.credits
+    );
 
-    const cost = missing * 2;
-    if (state.credits < cost) return false;
+    if (!result || !result.success) return false;
 
     set({
-      credits: state.credits - cost,
-      ship: { ...state.ship, currentShield: state.ship.maxShield },
+      credits: result.credits,
+      ship: result.ship,
     });
     get().saveGame();
     return true;
@@ -724,34 +663,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   addLeaderboardEntry: (entry) => {
     const state = get();
-    const newEntry: LeaderboardEntry = {
-      ...entry,
-      id: `lb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      date: Date.now(),
-    };
-    const newLeaderboard = [...state.leaderboard, newEntry]
-      .sort((a, b) => b.wavesSurvived - a.wavesSurvived || b.creditsEarned - a.creditsEarned)
-      .slice(0, 100);
+    const newLeaderboard = leaderboardActions.addEntry(state.leaderboard, entry);
     set({ leaderboard: newLeaderboard });
   },
 
   getSortedLeaderboard: () => {
     const state = get();
-    return [...state.leaderboard].sort(
-      (a, b) => b.wavesSurvived - a.wavesSurvived || b.creditsEarned - a.creditsEarned
-    );
+    return leaderboardActions.getSortedLeaderboard(state.leaderboard);
   },
 
   clearLeaderboard: () => {
-    set({ leaderboard: [] });
+    set({ leaderboard: leaderboardActions.clearLeaderboard() });
   },
 
   getArenaRank: (waves) => {
-    for (const rank of ARENA_RANKS) {
-      if (waves >= rank.minWaves && waves <= rank.maxWaves) {
-        return rank;
-      }
-    }
-    return ARENA_RANKS[ARENA_RANKS.length - 1];
+    return arenaActions.getArenaRank(waves);
   },
 }));

@@ -40,6 +40,7 @@ export default function GamePage() {
   const wasTravelingRef = useRef<boolean>(false);
   const travelEventFiredRef = useRef<boolean>(false);
   const lastTravelRef = useRef<{ from: string; to: string } | null>(null);
+  const lastArenaPhaseRef = useRef<string | null>(null);
 
   if (!currentPlanetId) {
     navigate('/');
@@ -85,7 +86,15 @@ export default function GamePage() {
   }, [travelState, ship.maxShield, ship.damage, setBattleState, triggerEvent]);
 
   useEffect(() => {
-    if (arenaState?.phase === 'battle' && !battleState) {
+    if (!arenaState) {
+      lastArenaPhaseRef.current = null;
+      return;
+    }
+
+    const currentPhase = arenaState.phase;
+    const lastPhase = lastArenaPhaseRef.current;
+
+    if (currentPhase === 'battle' && !battleState) {
       const battle = createArenaWaveBattleState(
         ship.maxShield,
         ship.damage,
@@ -94,7 +103,9 @@ export default function GamePage() {
       );
       setBattleState(battle);
     }
-  }, [arenaState?.phase, arenaState?.currentWave, ship.maxShield, ship.damage, ship.currentShield, battleState, setBattleState]);
+
+    lastArenaPhaseRef.current = currentPhase;
+  }, [arenaState?.phase, arenaState?.currentWave, ship.maxShield, ship.damage, ship.currentShield, battleState, setBattleState, arenaState]);
 
   const handleArenaBattleFinish = (won: boolean) => {
     completeArenaWave(won);

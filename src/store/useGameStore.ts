@@ -26,6 +26,7 @@ import { getRandomEvent } from '../data/events';
 import { localStorageAdapter, buildSavePayload } from '../hooks/usePersistence';
 import { arenaActions } from '../hooks/useArena';
 import { leaderboardActions } from '../hooks/useLeaderboard';
+import { createArenaWaveBattleState } from '../utils/battleEngine';
 
 export interface GameStore extends GameState {
   hasSave: () => boolean;
@@ -583,8 +584,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
   updateArena: (dt) => {
     const state = get();
     if (!state.arenaState) return;
-    const newArena = arenaActions.updateArena(state.arenaState, dt);
-    set({ arenaState: newArena });
+    const result = arenaActions.updateArena(state.arenaState, dt);
+
+    const updates: Partial<GameState> = { arenaState: result.arena };
+
+    if (result.shouldCreateBattle && result.waveForBattle !== null && !state.battleState) {
+      const battle = createArenaWaveBattleState(
+        state.ship.maxShield,
+        state.ship.damage,
+        result.waveForBattle,
+        state.ship.currentShield
+      );
+      updates.battleState = battle;
+    }
+
+    set(updates);
   },
 
   setArenaPhase: (phase) => {

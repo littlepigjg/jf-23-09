@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/useGameStore';
 import HUD from '../components/HUD';
@@ -11,7 +11,7 @@ import QuestPanel from '../components/QuestPanel';
 import ArenaPanel from '../components/ArenaPanel';
 import LeaderboardPanel from '../components/LeaderboardPanel';
 import { rollTravelEvent } from '../utils/travelEngine';
-import { createInitialBattleState, createArenaWaveBattleState } from '../utils/battleEngine';
+import { createInitialBattleState } from '../utils/battleEngine';
 import type { GameState } from '../types/game';
 import { NAV_ITEMS } from '../data/navigation';
 
@@ -32,6 +32,7 @@ export default function GamePage() {
     ship,
     currentPlanetId,
     arenaState,
+    updateArena,
     completeArenaWave,
   } = useGameStore();
 
@@ -40,7 +41,7 @@ export default function GamePage() {
   const wasTravelingRef = useRef<boolean>(false);
   const travelEventFiredRef = useRef<boolean>(false);
   const lastTravelRef = useRef<{ from: string; to: string } | null>(null);
-  const lastArenaPhaseRef = useRef<string | null>(null);
+  const battleFinishedRef = useRef<boolean>(false);
 
   if (!currentPlanetId) {
     navigate('/');
@@ -52,11 +53,15 @@ export default function GamePage() {
       const dt = Math.min(0.05, (now - lastTimeRef.current) / 1000);
       lastTimeRef.current = now;
       updateTravel(dt);
+      const state = useGameStore.getState();
+      if (state.arenaState) {
+        updateArena(dt);
+      }
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [updateTravel]);
+  }, [updateTravel, updateArena]);
 
   useEffect(() => {
     const isTraveling = !!travelState?.isTraveling;
@@ -86,30 +91,26 @@ export default function GamePage() {
   }, [travelState, ship.maxShield, ship.damage, setBattleState, triggerEvent]);
 
   useEffect(() => {
-    if (!arenaState) {
-      lastArenaPhaseRef.current = null;
+    battleFinishedRef.current = false;
+  }, [battleState]);
+
+  const handleBattleFinish = useCallback((won: boolean) => {
+    if (battleFinishedRef.current) {
+      return;
+    }
+    battleFinishedRef.current = true;
+
+    const currentBattle = useGameStore.getState().battleState;
+    if (!currentBattle) {
       return;
     }
 
-    const currentPhase = arenaState.phase;
-    const lastPhase = lastArenaPhaseRef.current;
-
-    if (currentPhase === 'battle' && !battleState) {
-      const battle = createArenaWaveBattleState(
-        ship.maxShield,
-        ship.damage,
-        arenaState.currentWave,
-        ship.currentShield
-      );
-      setBattleState(battle);
+    if (currentBattle.origin === 'arena') {
+      completeArenaWave(won);
+    } else {
+      completeBattle(won);
     }
-
-    lastArenaPhaseRef.current = currentPhase;
-  }, [arenaState?.phase, arenaState?.currentWave, ship.maxShield, ship.damage, ship.currentShield, battleState, setBattleState, arenaState]);
-
-  const handleArenaBattleFinish = (won: boolean) => {
-    completeArenaWave(won);
-  };
+  }, [completeArenaWave, completeBattle]);
 
   const handleBackToMenu = () => {
     saveGame();
@@ -187,21 +188,21 @@ export default function GamePage() {
 
       {battleState && (
         <div className="fixed inset-0 z-50">
-          {arenaState?.phase === 'battle' && (
+          {battleState.origin === 'arena' && (
             <div
               className="absolute top-4 left-1/2 -translate-x-1/2 px-6 py-2 bg-slate-900/90 backdrop-blur-sm rounded-lg border border-orange-500/50 z-50 pointer-events-none"
             >
               <div className="text-center">
                 <div className="text-xs text-slate-400">竞技场</div>
                 <div className="text-lg font-bold text-orange-400">
-                  第 {arenaState.currentWave} 波 · {arenaState.currentWave} 艘
+                  第 {battleState.difficulty} 波 · {battleState.difficulty} 艘
                 </div>
               </div>
             </div>
           )}
           <BattleScene
             difficulty={battleState.difficulty}
-            onFinish={arenaState?.phase === 'battle' ? handleArenaBattleFinish : completeBattle}
+            onFinish={handleBattleFinish}
           />
         </div>
       )}

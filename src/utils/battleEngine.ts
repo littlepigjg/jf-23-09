@@ -47,6 +47,7 @@ export const createInitialBattleState = (
     countdown: 3,
     difficulty,
     shakeTime: 0,
+    origin: 'world',
   };
 };
 
@@ -97,6 +98,7 @@ export const createArenaWaveBattleState = (
     countdown: 3,
     difficulty: wave,
     shakeTime: 0,
+    origin: 'arena',
   };
 };
 
@@ -321,6 +323,7 @@ export const updateBattle = (
       countdown: 0,
       difficulty: state.difficulty,
       shakeTime,
+      origin: state.origin,
     },
     shootCooldown: newShootCooldown,
   };

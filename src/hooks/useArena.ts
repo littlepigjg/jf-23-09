@@ -1,10 +1,16 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { ArenaState, ArenaRank, LeaderboardEntry, ShipState, BattleState } from '../types/game';
 import { ARENA_RANKS } from '../types/game';
 
+export interface ArenaUpdateResult {
+  arena: ArenaState;
+  shouldCreateBattle: boolean;
+  waveForBattle: number | null;
+}
+
 export interface ArenaActions {
   startArena: () => Partial<ArenaState>;
-  updateArena: (state: ArenaState, dt: number) => ArenaState;
+  updateArena: (state: ArenaState, dt: number) => ArenaUpdateResult;
   completeArenaWave: (
     arenaState: ArenaState,
     won: boolean,
@@ -15,7 +21,7 @@ export interface ArenaActions {
     arena: ArenaState;
     ship: ShipState;
     credits: number;
-    battleState: null;
+    battleState: BattleState | null;
     waveReward: number;
     leaderboardEntry?: Omit<LeaderboardEntry, 'id' | 'date'>;
     piratesDefeated: number;
@@ -44,16 +50,27 @@ export const arenaActions: ArenaActions = {
     totalCreditsEarned: 0,
     finalRank: null,
     finalReward: 0,
+    waveCompletedFor: null,
+    battleCreatedForWave: null,
   }),
 
   updateArena: (state, dt) => {
     const arena = { ...state };
+    let shouldCreateBattle = false;
+    let waveForBattle: number | null = null;
 
     if (arena.phase === 'countdown') {
       arena.countdownTimeRemaining -= dt;
       if (arena.countdownTimeRemaining <= 0) {
         arena.phase = 'battle';
         arena.countdownTimeRemaining = 0;
+        arena.waveCompletedFor = null;
+
+        if (arena.battleCreatedForWave !== arena.currentWave) {
+          shouldCreateBattle = true;
+          waveForBattle = arena.currentWave;
+          arena.battleCreatedForWave = arena.currentWave;
+        }
       }
     } else if (arena.phase === 'rest') {
       arena.restTimeRemaining -= dt;
@@ -62,16 +79,40 @@ export const arenaActions: ArenaActions = {
         arena.currentWave += 1;
         arena.countdownTimeRemaining = 3;
         arena.restTimeRemaining = 0;
+        arena.battleCreatedForWave = null;
       }
     }
 
-    return arena;
+    return { arena, shouldCreateBattle, waveForBattle };
   },
 
   calculateWaveReward: (wave) => 100 + wave * 50,
 
   completeArenaWave: (arenaState, won, battleState, ship, credits) => {
+    if (arenaState.phase !== 'battle') {
+      return {
+        arena: arenaState,
+        ship,
+        credits,
+        battleState,
+        waveReward: 0,
+        piratesDefeated: 0,
+      };
+    }
+    if (arenaState.waveCompletedFor === arenaState.currentWave) {
+      return {
+        arena: arenaState,
+        ship,
+        credits,
+        battleState,
+        waveReward: 0,
+        piratesDefeated: 0,
+      };
+    }
+
     const arena = { ...arenaState };
+    arena.waveCompletedFor = arena.currentWave;
+
     let newShip = { ...ship };
     let newCredits = credits;
     let piratesDefeated = 0;
@@ -175,6 +216,9 @@ export const arenaActions: ArenaActions = {
   },
 
   getArenaRank: (waves) => {
+    if (waves <= 0) {
+      return ARENA_RANKS[0];
+    }
     for (const rank of ARENA_RANKS) {
       if (waves >= rank.minWaves && waves <= rank.maxWaves) {
         return rank;
@@ -184,24 +228,60 @@ export const arenaActions: ArenaActions = {
   },
 };
 
-export function useArena() {
+export function useArena(
+  arenaState: ArenaState | null,
+  onUpdate: (arena: ArenaState, shouldCreateBattle: boolean, waveForBattle: number | null) => void
+) {
+  const rafRef = useRef<number>(0);
+  const lastTimeRef = useRef<number>(performance.now());
+  const arenaStateRef = useRef<ArenaState | null>(arenaState);
+
+  useEffect(() => {
+    arenaStateRef.current = arenaState;
+  }, [arenaState]);
+
+  useEffect(() => {
+    if (!arenaState) {
+      cancelAnimationFrame(rafRef.current);
+      return undefined;
+    }
+
+    lastTimeRef.current = performance.now();
+
+    const loop = (now: number) => {
+      const current = arenaStateRef.current;
+      if (!current) return;
+
+      const dt = Math.min(0.05, (now - lastTimeRef.current) / 1000);
+      lastTimeRef.current = now;
+
+      if (dt > 0) {
+        const result = arenaActions.updateArena(current, dt);
+        onUpdate(result.arena, result.shouldCreateBattle, result.waveForBattle);
+      }
+
+      rafRef.current = requestAnimationFrame(loop);
+    };
+
+    rafRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [arenaState !== null, onUpdate]);
+
   const startArena = useCallback(() => arenaActions.startArena(), []);
-  const updateArena = useCallback((state: ArenaState, dt: number) => arenaActions.updateArena(state, dt), []);
   const completeArenaWave = useCallback((
-    arenaState: ArenaState,
+    s: ArenaState,
     won: boolean,
-    battleState: BattleState | null,
-    ship: ShipState,
-    credits: number
-  ) => arenaActions.completeArenaWave(arenaState, won, battleState, ship, credits), []);
-  const endArena = useCallback((arenaState: ArenaState, ship: ShipState, credits: number) => arenaActions.endArena(arenaState, ship, credits), []);
-  const repairShieldDuringRest = useCallback((arenaState: ArenaState, ship: ShipState, credits: number) => arenaActions.repairShieldDuringRest(arenaState, ship, credits), []);
+    bs: BattleState | null,
+    sh: ShipState,
+    cr: number
+  ) => arenaActions.completeArenaWave(s, won, bs, sh, cr), []);
+  const endArena = useCallback((s: ArenaState, sh: ShipState, cr: number) => arenaActions.endArena(s, sh, cr), []);
+  const repairShieldDuringRest = useCallback((s: ArenaState, sh: ShipState, cr: number) => arenaActions.repairShieldDuringRest(s, sh, cr), []);
   const getArenaRank = useCallback((waves: number) => arenaActions.getArenaRank(waves), []);
   const calculateWaveReward = useCallback((wave: number) => arenaActions.calculateWaveReward(wave), []);
 
   return {
     startArena,
-    updateArena,
     completeArenaWave,
     endArena,
     repairShieldDuringRest,

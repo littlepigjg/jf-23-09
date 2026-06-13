@@ -112,6 +112,7 @@ export interface BattleState {
   countdown: number;
   difficulty: number;
   shakeTime: number;
+  origin: 'arena' | 'world';
 }
 
 export interface EventChoice {
@@ -170,6 +171,8 @@ export interface ArenaState {
   totalCreditsEarned: number;
   finalRank: ArenaRank | null;
   finalReward: number;
+  waveCompletedFor: number | null;
+  battleCreatedForWave: number | null;
 }
 
 export interface LeaderboardEntry {

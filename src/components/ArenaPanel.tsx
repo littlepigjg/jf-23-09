@@ -15,33 +15,49 @@ export default function ArenaPanel() {
     getArenaRank,
   } = useGameStore();
 
-  const lastTimeRef = useRef<number>(performance.now());
   const rafRef = useRef<number>(0);
+  const lastTimeRef = useRef<number>(performance.now());
+  const isActiveRef = useRef<boolean>(false);
 
   useEffect(() => {
-    if (!arenaState) return;
+    isActiveRef.current = arenaState !== null;
+
+    if (!arenaState) {
+      cancelAnimationFrame(rafRef.current);
+      return undefined;
+    }
+
+    lastTimeRef.current = performance.now();
 
     const loop = (now: number) => {
+      if (!isActiveRef.current) return;
+
       const dt = Math.min(0.05, (now - lastTimeRef.current) / 1000);
       lastTimeRef.current = now;
-      updateArena(dt);
+
+      if (dt > 0) {
+        updateArena(dt);
+      }
+
       rafRef.current = requestAnimationFrame(loop);
     };
 
     rafRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [arenaState, updateArena]);
+  }, [arenaState !== null, updateArena]);
 
   const handleStart = () => {
     startArena();
   };
 
   const handleExit = () => {
+    isActiveRef.current = false;
     endArena();
     setView('starmap');
   };
 
   const handleLeaveFinished = () => {
+    isActiveRef.current = false;
     useGameStore.setState({ arenaState: null });
     setView('starmap');
   };
@@ -211,7 +227,7 @@ export default function ArenaPanel() {
             <div className="text-center mb-6">
               <div className="text-4xl font-black text-neon-green mb-2">✅ 波次胜利！</div>
               <div className="text-slate-300">
-                获得奖励: <span className="text-neon-yellow font-bold">₵{(100 + (arenaState.currentWave) * 50).toLocaleString()}</span>
+                获得奖励: <span className="text-neon-yellow font-bold">₵{(100 + (arenaState.wavesSurvived) * 50).toLocaleString()}</span>
               </div>
             </div>
 
@@ -308,9 +324,13 @@ export default function ArenaPanel() {
           </div>
         )}
 
-        {arenaState.phase !== 'battle' && arenaState.phase !== 'countdown' && arenaState.phase !== 'rest' && arenaState.phase !== 'finished' && (
-          <div className="panel p-8 border border-slate-700/60 text-center">
-            <div className="text-slate-400">准备中...</div>
+        {arenaState.phase === 'battle' && (
+          <div className="panel p-8 border border-neon-red/50 text-center">
+            <div className="text-4xl mb-4 animate-pulse">⚔️</div>
+            <div className="text-2xl font-black text-neon-red mb-2">战斗进行中...</div>
+            <div className="text-slate-400">
+              正在对抗第 {arenaState.currentWave} 波海盗
+            </div>
           </div>
         )}
       </div>

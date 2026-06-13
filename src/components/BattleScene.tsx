@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useGameStore } from '../store/useGameStore';
-import { createInitialBattleState, updateBattle } from '../utils/battleEngine';
+import { updateBattle } from '../utils/battleEngine';
 import type { BattleState } from '../types/game';
 
 interface BattleSceneProps {
@@ -19,19 +19,47 @@ interface Star {
   brightness: number;
 }
 
-export default function BattleScene({ difficulty, onFinish }: BattleSceneProps) {
+const cloneBattleState = (s: BattleState): BattleState => ({
+  ...s,
+  player: { ...s.player },
+  pirates: s.pirates.map((p) => ({ ...p })),
+  bullets: s.bullets.map((b) => ({ ...b })),
+  particles: s.particles.map((p) => ({ ...p })),
+});
+
+export default function BattleScene({ difficulty: _difficulty, onFinish }: BattleSceneProps) {
   const ship = useGameStore((s) => s.ship);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keysRef = useRef<Record<string, boolean>>({});
-  const battleStateRef = useRef<BattleState>(
-    createInitialBattleState(ship.currentShield, ship.damage, difficulty)
-  );
+  const battleStateRef = useRef<BattleState | null>(null);
   const shootCooldownRef = useRef<number>(0);
   const animationFrameRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
   const starsRef = useRef<Star[]>([]);
   const finishTimerRef = useRef<number | null>(null);
+  const onFinishCalledRef = useRef<boolean>(false);
   const [, forceRender] = useState(0);
+
+  if (battleStateRef.current === null) {
+    const storedBattle = useGameStore.getState().battleState;
+    if (storedBattle) {
+      battleStateRef.current = cloneBattleState(storedBattle);
+    }
+  }
+
+  const safeOnFinish = useCallback(
+    (won: boolean) => {
+      if (onFinishCalledRef.current) return;
+      onFinishCalledRef.current = true;
+      if (finishTimerRef.current !== null) {
+        clearTimeout(finishTimerRef.current);
+        finishTimerRef.current = null;
+      }
+      cancelAnimationFrame(animationFrameRef.current);
+      onFinish(won);
+    },
+    [onFinish]
+  );
 
   useEffect(() => {
     const stars: Star[] = [];
@@ -75,6 +103,7 @@ export default function BattleScene({ difficulty, onFinish }: BattleSceneProps) 
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    if (!battleStateRef.current) return;
 
     const render = (state: BattleState) => {
       ctx.save();
@@ -216,6 +245,8 @@ export default function BattleScene({ difficulty, onFinish }: BattleSceneProps) 
       const dt = Math.min((timestamp - lastTimeRef.current) / 1000, 0.05);
       lastTimeRef.current = timestamp;
 
+      if (!battleStateRef.current) return;
+
       const result = updateBattle(
         battleStateRef.current,
         keysRef.current,
@@ -243,7 +274,7 @@ export default function BattleScene({ difficulty, onFinish }: BattleSceneProps) 
       if (result.state.result === 'win' || result.state.result === 'lose') {
         if (finishTimerRef.current === null) {
           finishTimerRef.current = window.setTimeout(() => {
-            onFinish(result.state.result === 'win');
+            safeOnFinish(result.state.result === 'win');
           }, 2000);
         }
         return;
@@ -258,11 +289,20 @@ export default function BattleScene({ difficulty, onFinish }: BattleSceneProps) 
       cancelAnimationFrame(animationFrameRef.current);
       if (finishTimerRef.current !== null) {
         clearTimeout(finishTimerRef.current);
+        finishTimerRef.current = null;
       }
     };
-  }, [ship.damage, onFinish]);
+  }, [ship.damage, safeOnFinish]);
 
   const state = battleStateRef.current;
+  if (!state) {
+    return (
+      <div className="relative flex items-center justify-center w-full h-full bg-slate-950">
+        <div className="text-2xl text-slate-400">加载战斗...</div>
+      </div>
+    );
+  }
+
   const playerHpRatio = Math.max(0, state.player.hp / state.player.maxHp);
   const piratesTotalHp = state.pirates.reduce((sum, p) => sum + p.hp, 0);
   const piratesTotalMaxHp = state.pirates.reduce((sum, p) => sum + p.maxHp, 0) || 1;
@@ -338,7 +378,7 @@ export default function BattleScene({ difficulty, onFinish }: BattleSceneProps) 
               </div>
               <div className="text-xl text-slate-300 mb-6">你击败了所有海盗!</div>
               <button
-                onClick={() => onFinish(true)}
+                onClick={() => safeOnFinish(true)}
                 className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-all shadow-lg shadow-emerald-900/50 hover:scale-105"
               >
                 返回
@@ -355,7 +395,7 @@ export default function BattleScene({ difficulty, onFinish }: BattleSceneProps) 
               </div>
               <div className="text-xl text-slate-300 mb-6">你的飞船被击毁了...</div>
               <button
-                onClick={() => onFinish(false)}
+                onClick={() => safeOnFinish(false)}
                 className="px-8 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition-all shadow-lg shadow-red-900/50 hover:scale-105"
               >
                 返回
